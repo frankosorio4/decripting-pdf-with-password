@@ -3,11 +3,31 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { execSync } = require('child_process');
+const os = require('os');
 
 const app = express();
 const PORT = 3000;
 
-// Configure multer for file uploads
+// OS Detection
+const isWindows = os.platform() === 'win32';
+const QPDF_PATH = isWindows ? path.join(__dirname, 'bin', 'qpdf.exe') : 'qpdf';
+
+// Verify qpdf at startup
+try {
+  const checkCmd = isWindows ? `"${QPDF_PATH}" --version` : `${QPDF_PATH} --version`;
+  execSync(checkCmd, { stdio: 'ignore' });
+  console.log(`qpdf detected successfully at: ${QPDF_PATH}`);
+} catch (error) {
+  console.error('CRITICAL ERROR: qpdf not found.');
+  if (isWindows) {
+    console.error(`Ensure qpdf.exe exists at: ${QPDF_PATH}`);
+  } else {
+    console.error('Ensure qpdf is installed via: sudo apt-get install qpdf');
+  }
+  process.exit(1);
+}
+
+// Serve the HTML page
 const upload = multer({ 
   dest: 'uploads/',
   fileFilter: (req, file, cb) => {
@@ -37,19 +57,6 @@ if (!fs.existsSync('downloads')) {
   fs.mkdirSync('downloads');
 }
 
-// Path to bundled qpdf binary
-const QPDF_PATH = path.join(__dirname, 'bin', 'qpdf.exe');
-
-// Verify qpdf at startup
-try {
-  execSync(`"${QPDF_PATH}" --version`, { stdio: 'ignore' });
-  console.log('qpdf detected successfully at:', QPDF_PATH);
-} catch (error) {
-  console.error('CRITICAL ERROR: qpdf not found at:', QPDF_PATH);
-  process.exit(1);
-}
-
-// Serve the HTML page
 app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -462,9 +469,11 @@ app.post('/decrypt', upload.single('pdf'), (req, res) => {
 
     try {
       // Execute qpdf command
-      execSync(`"${QPDF_PATH}" --password="${password.replace(/"/g, '\\"')}" --decrypt "${inputFile}" "${outputPath}"`, {
-        stdio: 'pipe'
-      });
+      const cmd = isWindows 
+        ? `"${QPDF_PATH}" --password="${password.replace(/"/g, '\\"')}" --decrypt "${inputFile}" "${outputPath}"`
+        : `${QPDF_PATH} --password='${password.replace(/'/g, "'\\''")}' --decrypt "${inputFile}" "${outputPath}"`;
+      
+      execSync(cmd, { stdio: 'pipe' });
 
       // Clean up uploaded file
       fs.unlinkSync(inputFile);
